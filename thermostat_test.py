@@ -1,7 +1,10 @@
+from PySide2 import QtWidgets
 from thermostat import Room, Sensor, Actuator, Thermostat, OutsideTemperature
+from thermostat_gui import MyWidget
 from test_framework import TestCase, TestRunner
 import threading
 import time
+import sys
 
 outside_temperature = 20.
 target_temperature = 22.
@@ -60,42 +63,62 @@ tc2 = TestCase(name="Do nothing if current temperature is on target",
 
 
 class DataPrinter(threading.Thread):
-  def __init__(self, room, thermostat, actuator):
+  def __init__(self, room, thermostat, actuator, outside_temperature, widget):
     super().__init__()
     self.room = room
     self.thermostat = thermostat
     self.actuator = actuator
+    self.outside_temperature = outside_temperature
     self.running = False
+    self.widget = widget
 
   def run(self):
     self.running = True
     while self.running:
-      print(f"Room temperature: {self.room.temperature} Thermostat target: {self.thermostat.target} Thermostat slack: {self.thermostat.slack} Actuator state: {self.actuator.state}")
-      time.sleep(0.5)
+      self.widget.updateRoomTemperature(self.room.temperature)
+      self.widget.updateOutsideTemperature(self.outside_temperature.temperature)
+      self.widget.updateActuatorStatus(self.actuator.state)
+      self.widget.updateThermostatSlack(self.thermostat.slack)
+      self.widget.updateThermostatTarget(self.thermostat.target)
+      time.sleep(0.1)
 
 
 class ChangeConditions(threading.Thread):
   def __init__(self, outside_temperature):
     super().__init__()
     self.outside_temperature = outside_temperature
+    self.running = False
 
   def run(self):
+    self.running = True
     start_time = time.time()
-    while True:
+    while self.running:
       if time.time() > start_time + 60:
         self.outside_temperature.temperature = 24
         break
+      time.sleep(0.01)
 
-def cleanup(dp):
-  dp.running = False
-  dp.join()
+app = QtWidgets.QApplication([])
+widget = MyWidget()
+widget.resize(1000, 100)
+widget.show()
 
-dp = DataPrinter(room, thermostat, actuator)
+dp = DataPrinter(room, thermostat, actuator, outside_temperature_mod, widget)
 dp.start()
-tr = TestRunner([tc0, tc1, tc2], lambda: cleanup(dp))
+tr = TestRunner([tc0, tc1, tc2])
 tr.start()
 thermostat.start()
 outside_temperature_mod.start()
 cc = ChangeConditions(outside_temperature_mod)
 cc.start()
-input()
+app.exec_()
+outside_temperature_mod.running = False
+thermostat.running = False
+tr.running = False
+cc.running = False
+dp.running = False
+dp.join()
+cc.join()
+tr.join()
+thermostat.join()
+outside_temperature_mod.join()

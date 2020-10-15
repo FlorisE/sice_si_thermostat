@@ -22,6 +22,7 @@ class TestCase(threading.Thread):
     self._state = "Initialized"
     self.result = None
     self.invariants_at_least_once = invariants_at_least_once
+    self.running = False
 
   @property
   def state(self):
@@ -29,7 +30,7 @@ class TestCase(threading.Thread):
 
   @state.setter
   def state(self, new_state):
-    print(f"Test Case {self.name} transitioning from {self.state} to {new_state}")
+    print(f"{self.name:<60} {self.state:<50} {new_state:<50}")
     self._state = new_state
 
   def evaluate_preconditions(self):
@@ -56,13 +57,16 @@ class TestCase(threading.Thread):
     while self.running and not self.evaluate_preconditions():
       time.sleep(SLEEP_TIME)
 
-    use_timer = self.max_duration != 0
+    if self.running:
+      use_timer = self.max_duration != 0
 
-    if use_timer:
-      current_time = time.time()
-    
-    self.state = "Evaluating invariants, preempts and postconditions"
+      if use_timer:
+        current_time = time.time()
+      
+      self.state = "Evaluating invariants, preempts and postconditions"
+
     while self.running:
+      time.sleep(SLEEP_TIME)
       if use_timer:
         time_condition = time.time() < current_time + self.max_duration 
       preempts = self.evaluate_preempts()
@@ -82,7 +86,6 @@ class TestCase(threading.Thread):
       if not invariants:
         self.finish(False, "Invariants")
         break
-      time.sleep(SLEEP_TIME)
 
   def finish(self, success, message=None):
     self.result = TestCaseResult(success, message)
@@ -91,14 +94,14 @@ class TestCase(threading.Thread):
 
 def print_status(test_case):
   if test_case.result is None:
-    print(f"Test Case {test_case.name} Running")
+    print(f"{test_case.name:<60} No result")
     return
 
   status = "SUCCESS" if test_case.result.success else "FAILED"
   if test_case.result.message:
-    print(f"Test Case {test_case.name} {status} {test_case.result.message}")
+    print(f"{test_case.name:<60} {status:<50} {test_case.result.message}")
   else:
-    print(f"Test Case {test_case.name} {status}")
+    print(f"{test_case.name:<60} {status}")
 
 
 class TestRunner(threading.Thread):
@@ -111,24 +114,21 @@ class TestRunner(threading.Thread):
   def run(self):
     self.running = True
 
+    print("{0:<60} {1:<50} {2:<50}".format("TEST CASE", "FROM", "TO"))
     for test_case in self.test_cases:
       test_case.start()
   
-    report_time = time.time() + 10
-  
     while self.running:
-      for test_case in self.test_cases:
-        test_case.join(0.05)
-      if time.time() > report_time:
-        for test_case in self.test_cases:
-          print_status(test_case)
-        report_time = time.time() + 10
       if all([test_case.state == "Finished" for test_case in self.test_cases]):
         self.running = False
         if self.finalizer:
           self.finalizer()
-  
       time.sleep(SLEEP_TIME)
   
+    print()
+    print("{0:<60} {1:<50} {2}".format("TEST CASE", "STATUS", "MESSAGE"))
     for test_case in self.test_cases:
+      if test_case.running:
+          test_case.finish(False, "Terminated")
+      test_case.join()
       print_status(test_case)
